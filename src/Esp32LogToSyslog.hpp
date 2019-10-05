@@ -10,8 +10,8 @@ class Esp32LogToSyslog
 {
 public:
     Esp32LogToSyslog(UDP &client, const char* deviceHostname = "ESP32");
-    void begin(const char* server, uint16_t port = 514);
-    void begin(IPAddress ip, uint16_t port = 514);
+    void begin(const char* server, const char* deviceHostname = nullptr, uint16_t port = 514);
+    void begin(IPAddress ip, const char* deviceHostname = nullptr, uint16_t port = 514);
     bool sendSyslogMessage(const char *message, int pri = -1);
 
 private:

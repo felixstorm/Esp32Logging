@@ -8,17 +8,21 @@ Esp32LogToSyslog::Esp32LogToSyslog(UDP &client, const char *deviceHostname)
     this->_deviceHostname = deviceHostname;
 }
 
-void Esp32LogToSyslog::begin(const char *server, uint16_t port)
+void Esp32LogToSyslog::begin(const char *server, const char *deviceHostname, uint16_t port)
 {
     this->_server = server;
     this->_port = port;
+    if (deviceHostname)
+        this->_deviceHostname = deviceHostname;
     begin();
 }
 
-void Esp32LogToSyslog::begin(IPAddress ip, uint16_t port)
+void Esp32LogToSyslog::begin(IPAddress ip, const char *deviceHostname, uint16_t port)
 {
     this->_ip = ip;
     this->_port = port;
+    if (deviceHostname)
+        this->_deviceHostname = deviceHostname;
     begin();
 }
 
