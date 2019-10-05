@@ -10,7 +10,12 @@ Esp32LogToSyslog::Esp32LogToSyslog(UDP &client, const char *deviceHostname)
 
 void Esp32LogToSyslog::begin(const char *server, const char *deviceHostname, uint16_t port)
 {
-    this->_server = server;
+    IPAddress ipAddr;
+    if (ipAddr.fromString(server))
+        this->_ip = ipAddr;
+    else 
+        this->_server = server;
+    
     this->_port = port;
     if (deviceHostname)
         this->_deviceHostname = deviceHostname;
