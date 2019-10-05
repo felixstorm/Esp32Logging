@@ -1,4 +1,5 @@
 #include "Esp32LogToSyslog.hpp"
+#include <WiFi.h>
 
 QueueHandle_t Esp32LogToSyslog::xCharQueue = xQueueCreate(ESP32LOGTOSYSLOG_QUEUE_SIZE, sizeof(char));
 
@@ -112,6 +113,10 @@ void Esp32LogToSyslog::sendCharToSyslog(char c)
     if (lastError && millis() - lastError < delayOnError)
         return;
 
+    // No need to try without network
+    if (!WiFi.isConnected())
+        return;
+        
     do
     {
         if (c != '\n')
