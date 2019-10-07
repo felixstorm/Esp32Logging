@@ -16,12 +16,13 @@ public:
 
 private:
     static bool queueUartOutputFlag;
-    bool _doSyslog;
+    bool _doSyslog = false;
     UDP* _client;
     String _server;
     IPAddress _ip;
     uint16_t _port;
     String _syslogHostname;
+    bool _beginCalled = false;
     bool _packetStarted = false;
 
     static QueueHandle_t xCharQueue;

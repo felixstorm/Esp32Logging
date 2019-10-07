@@ -35,10 +35,15 @@ Esp32ExtendedLogging &Esp32ExtendedLogging::deviceHostname(const char *deviceHos
 
 Esp32ExtendedLogging &Esp32ExtendedLogging::begin()
 {
-    xTaskCreate(logOutputTask, "Esp32LogToSyslogLogOutputTask", 10000, this, 1, NULL);
+    if (!_beginCalled)
+    {
+        xTaskCreate(logOutputTask, "Esp32LogToSyslogLogOutputTask", 10000, this, 1, NULL);
 
-    esp_log_set_vprintf(vprintf_replacement);
-    ets_install_putc1((void (*)(char)) & ets_putc_replacement);
+        esp_log_set_vprintf(vprintf_replacement);
+        ets_install_putc1((void (*)(char)) & ets_putc_replacement);
+    }
+
+    this->_beginCalled = true;
 
     return *this;
 }
