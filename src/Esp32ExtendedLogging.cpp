@@ -1,62 +1,60 @@
-#include "Esp32LogToSyslog.hpp"
+#include "Esp32ExtendedLogging.hpp"
 #include <WiFi.h>
 
-QueueHandle_t Esp32LogToSyslog::xCharQueue = xQueueCreate(ESP32LOGTOSYSLOG_QUEUE_SIZE, sizeof(char));
+QueueHandle_t Esp32ExtendedLogging::xCharQueue = xQueueCreate(ESP32LOGTOSYSLOG_QUEUE_SIZE, sizeof(char));
+bool Esp32ExtendedLogging::queueUartOutputFlag = false;
 
-Esp32LogToSyslog::Esp32LogToSyslog(UDP &client, const char *deviceHostname)
+Esp32ExtendedLogging &Esp32ExtendedLogging::queueUartOutput(bool queueUartOutput)
 {
-    this->_client = &client;
-    this->_deviceHostname = deviceHostname;
+    queueUartOutputFlag = queueUartOutput; // static
+    return *this;
 }
 
-void Esp32LogToSyslog::begin(const char *server, const char *deviceHostname, uint16_t port)
+Esp32ExtendedLogging &Esp32ExtendedLogging::doSyslog(UDP &client, const char *server, uint16_t port)
 {
+    this->_client = &client;
+
     IPAddress ipAddr;
     if (ipAddr.fromString(server))
         this->_ip = ipAddr;
-    else 
+    else
         this->_server = server;
-    
+
     this->_port = port;
-    if (deviceHostname)
-        this->_deviceHostname = deviceHostname;
-    begin();
+
+    _doSyslog = true;
+
+    return *this;
 }
 
-void Esp32LogToSyslog::begin(IPAddress ip, const char *deviceHostname, uint16_t port)
+Esp32ExtendedLogging &Esp32ExtendedLogging::deviceHostname(const char *deviceHostname)
 {
-    this->_ip = ip;
-    this->_port = port;
-    if (deviceHostname)
-        this->_deviceHostname = deviceHostname;
-    begin();
+    this->_syslogHostname = deviceHostname;
+    return *this;
 }
 
-void Esp32LogToSyslog::begin()
+Esp32ExtendedLogging &Esp32ExtendedLogging::begin()
 {
     xTaskCreate(logOutputTask, "Esp32LogToSyslogLogOutputTask", 10000, this, 1, NULL);
 
     esp_log_set_vprintf(vprintf_replacement);
     ets_install_putc1((void (*)(char)) & ets_putc_replacement);
+
+    return *this;
 }
 
-void IRAM_ATTR Esp32LogToSyslog::ets_putc_replacement(char c)
+void IRAM_ATTR Esp32ExtendedLogging::ets_putc_replacement(char c)
 {
-    // TBD enable (but currently it crashes...)
-    // // send to serial (as usual)
-    // static const int kUartTxFifoCntS = 16;  // from UART_TXFIFO_CNT_S in framework-arduinoespressif32/tools/sdk/include/soc/soc/uart_reg.h
-    // while (((ESP_REG(0x01C + DR_REG_UART_BASE) >> kUartTxFifoCntS) & 0x7F) == 0x7F)
-    //     ;
-    // ESP_REG(DR_REG_UART_BASE) = c;
+    // send to serial (as usual)
+    if (!queueUartOutputFlag)
+        ets_write_char_uart(c);
 
     // also send to queue to be sysloged
     if (xPortInIsrContext())
     {
-        // Based on sample code from FreeRTOS
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        xQueueSendToBackFromISR(xCharQueue, &c, &xHigherPriorityTaskWoken);
-        if (xHigherPriorityTaskWoken)
-            taskYIELD();
+        // Sample code from FreeRTOS asks to call taskYIELD on xHigherPriorityTaskWoken,
+        // but this leads to WDT timeouts - so we ignore it for now.
+        xQueueSendToBackFromISR(xCharQueue, &c, nullptr);
     }
     else
     {
@@ -64,7 +62,7 @@ void IRAM_ATTR Esp32LogToSyslog::ets_putc_replacement(char c)
     }
 }
 
-int Esp32LogToSyslog::vprintf_replacement(const char *fmt, va_list args)
+int Esp32ExtendedLogging::vprintf_replacement(const char *fmt, va_list args)
 {
     const size_t initialLen = strlen(fmt);
     char *message = new char[initialLen + 1];
@@ -76,35 +74,36 @@ int Esp32LogToSyslog::vprintf_replacement(const char *fmt, va_list args)
         vsnprintf(message, len + 1, fmt, args);
     }
 
-    // TBD enable (currently problems in ets_putc_replacement)
-    // // send to serial (as usual)
-    // printf(message);
+    // send to serial (as usual)
+    if (!queueUartOutputFlag)
+        printf(message);
 
-    // also send to queue to be sysloged
-    char *buffer = message;
-    while (*buffer)
-        xQueueSendToBack(xCharQueue, buffer++, 0); // do not block at all
+    // also send to queue to be sysloged (not to be used from ISRs anyway)
+    char *bufferForQueue = message;
+    while (*bufferForQueue)
+        xQueueSendToBack(xCharQueue, bufferForQueue++, 0); // do not block at all
 
     delete[] message;
     return true;
 }
 
-void Esp32LogToSyslog::logOutputTask(void *parameter)
+void Esp32ExtendedLogging::logOutputTask(void *parameter)
 {
-    Esp32LogToSyslog *thisClass = (Esp32LogToSyslog *)parameter;
+    Esp32ExtendedLogging *thisClass = (Esp32ExtendedLogging *)parameter;
     for (;;)
     {
         char c;
         if (xQueueReceive(xCharQueue, &c, (TickType_t)10))
         {
-            thisClass->sendCharToSyslog(c);
-            // TBD move to upper layers
-            Serial.print(c);
+            if (queueUartOutputFlag)
+                Serial.print(c);
+            if (thisClass->_doSyslog)
+                thisClass->sendCharToSyslog(c);
         }
     }
 }
 
-void Esp32LogToSyslog::sendCharToSyslog(char c)
+void Esp32ExtendedLogging::sendCharToSyslog(char c)
 {
     static const ulong delayOnError = 2000;
     static ulong lastError = 0;
@@ -116,7 +115,7 @@ void Esp32LogToSyslog::sendCharToSyslog(char c)
     // No need to try without network
     if (!WiFi.isConnected())
         return;
-        
+
     do
     {
         if (c != '\n')
@@ -144,12 +143,12 @@ void Esp32LogToSyslog::sendCharToSyslog(char c)
 
     lastError = millis();
     _packetStarted = false;
-    ESP_LOGE("Esp32LogToSyslog", "Error sending syslog message, pausing for %d seconds...", (uint)delayOnError / 1000);
+    ESP_LOGE("Esp32ExtendedLogging", "Error sending syslog message, pausing for %d seconds...", (uint)delayOnError / 1000);
     return;
 }
 
 // based on https://github.com/arcao/Syslog
-bool Esp32LogToSyslog::beginSyslogPacket(int pri)
+bool Esp32ExtendedLogging::beginSyslogPacket(int pri)
 {
     if ((this->_server == NULL && this->_ip == INADDR_NONE) || this->_port == 0)
         return false;
@@ -157,7 +156,7 @@ bool Esp32LogToSyslog::beginSyslogPacket(int pri)
     if (pri < 0)
         pri = 1 << 3 | 6; // user, informational
 
-    if (!(this->_server != NULL ? this->_client->beginPacket(this->_server, this->_port) : this->_client->beginPacket(this->_ip, this->_port)))
+    if (!(this->_server != NULL ? this->_client->beginPacket(this->_server.c_str(), this->_port) : this->_client->beginPacket(this->_ip, this->_port)))
         return false;
 
     // IETF Doc: https://tools.ietf.org/html/rfc5424
@@ -165,7 +164,7 @@ bool Esp32LogToSyslog::beginSyslogPacket(int pri)
     this->_client->print('<');
     this->_client->print(pri);
     this->_client->print('>');
-    this->_client->print(this->_deviceHostname);
+    this->_client->print(this->_syslogHostname);
     this->_client->print(' ');
 
     _packetStarted = true;
@@ -173,7 +172,7 @@ bool Esp32LogToSyslog::beginSyslogPacket(int pri)
     return true;
 }
 
-bool Esp32LogToSyslog::endSyslogPacket()
+bool Esp32ExtendedLogging::endSyslogPacket()
 {
     if (!_packetStarted)
         return false;
@@ -184,7 +183,7 @@ bool Esp32LogToSyslog::endSyslogPacket()
     return result;
 }
 
-bool Esp32LogToSyslog::sendSyslogMessage(const char *message, int pri)
+bool Esp32ExtendedLogging::sendSyslogMessage(const char *message, int pri)
 {
     if (!beginSyslogPacket())
         return false;

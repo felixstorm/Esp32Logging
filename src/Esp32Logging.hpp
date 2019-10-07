@@ -1,5 +1,8 @@
 #pragma once
 
+// need to include this up here as it would conflict with our redefinitions if included later
+#include <Arduino.h>
+
 /*
 *********************************************************************************************
 *** Logging must be enabled BOTH in platformio.ini AND in code using esp_log_level_set!!! ***
@@ -37,3 +40,29 @@ setup(): esp_log_level_set("*", ESP_LOG_INFO);
         else if (level==ESP_LOG_VERBOSE )   { esp_log_write(ESP_LOG_VERBOSE,    tag, LOG_FORMAT(V, tag, format), ##__VA_ARGS__); } \
         else                                { esp_log_write(ESP_LOG_INFO,       tag, LOG_FORMAT(I, tag, format), ##__VA_ARGS__); } \
     } while(0)
+
+
+#define ESP_ISR_LOGE( tag, format, ... ) ESP_LOG_ISR_IMPL(tag, format, ESP_LOG_ERROR,   E, ##__VA_ARGS__)
+#define ESP_ISR_LOGW( tag, format, ... ) ESP_LOG_ISR_IMPL(tag, format, ESP_LOG_WARN,    W, ##__VA_ARGS__)
+#define ESP_ISR_LOGI( tag, format, ... ) ESP_LOG_ISR_IMPL(tag, format, ESP_LOG_INFO,    I, ##__VA_ARGS__)
+#define ESP_ISR_LOGD( tag, format, ... ) ESP_LOG_ISR_IMPL(tag, format, ESP_LOG_DEBUG,   D, ##__VA_ARGS__)
+#define ESP_ISR_LOGV( tag, format, ... ) ESP_LOG_ISR_IMPL(tag, format, ESP_LOG_VERBOSE, V, ##__VA_ARGS__)
+
+#define ESP_LOG_ISR_IMPL(tag, format, log_level, log_tag_letter, ...) do {                         \
+        if (LOG_LOCAL_LEVEL >= log_level) {                                                          \
+            ets_printf(LOG_FORMAT(log_tag_letter, tag, format), ##__VA_ARGS__); \
+        }} while(0)
+
+
+#define ESP_LOG_SYSINFO(full) do {                                                                                                                                   \
+    if (full) {                                                                                                                                                      \
+        esp_chip_info_t info;                                                                                                                                        \
+        esp_chip_info(&info);                                                                                                                                        \
+        ESP_LOGI("SysInfo", "Chip info: model:%s, cores:%d, feature:%s%s%s%s%d MB, revision number:%d, IDF Version:%s",                                              \
+            info.model == CHIP_ESP32 ? "ESP32" : "Unknow", info.cores,                                                                                               \
+            info.features & CHIP_FEATURE_WIFI_BGN ? "/802.11bgn" : "", info.features & CHIP_FEATURE_BLE ? "/BLE" : "", info.features & CHIP_FEATURE_BT ? "/BT" : "", \
+            info.features & CHIP_FEATURE_EMB_FLASH ? "/Embedded-Flash:" : "/External-Flash:", spi_flash_get_chip_size() / (1024 * 1024), info.revision,              \
+            esp_get_idf_version());                                                                                                                                  \
+    }                                                                                                                                                                \
+    ESP_LOGI("SysInfo", "Current free heap size: %u, min free heap size: %u", esp_get_free_heap_size(), heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT));        \
+} while(0)
