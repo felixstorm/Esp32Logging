@@ -2,7 +2,7 @@
 
 #include <Esp32Logging.hpp>
 
-#define ESP32LOGTOSYSLOG_QUEUE_SIZE 1024
+#define ESP32LOGTOSYSLOG_QUEUE_SIZE 4096
 
 
 class Esp32ExtendedLogging
