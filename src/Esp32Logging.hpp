@@ -67,15 +67,81 @@ static const char* esp_log_timestamp_time() {
         }} while(0)
 
 
-#define ESP_LOG_SYSINFO(full) do {                                                                                                                                   \
-    if (full) {                                                                                                                                                      \
-        esp_chip_info_t info;                                                                                                                                        \
-        esp_chip_info(&info);                                                                                                                                        \
-        ESP_LOGI("SysInfo", "Chip info: model:%s, cores:%d, feature:%s%s%s%s%d MB, revision number:%d, IDF Version:%s",                                              \
-            info.model == CHIP_ESP32 ? "ESP32" : "Unknow", info.cores,                                                                                               \
-            info.features & CHIP_FEATURE_WIFI_BGN ? "/802.11bgn" : "", info.features & CHIP_FEATURE_BLE ? "/BLE" : "", info.features & CHIP_FEATURE_BT ? "/BT" : "", \
-            info.features & CHIP_FEATURE_EMB_FLASH ? "/Embedded-Flash:" : "/External-Flash:", spi_flash_get_chip_size() / (1024 * 1024), info.revision,              \
-            esp_get_idf_version());                                                                                                                                  \
-    }                                                                                                                                                                \
-    ESP_LOGI("SysInfo", "Current free heap size: %u, min free heap size: %u", esp_get_free_heap_size(), heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT));        \
-} while(0)
+#define ESP_LOG_SYSINFO(level, full) do {                                      \
+        if ( LOG_LOCAL_LEVEL >= level ) Esp32Logging::LogSysInfo(level, full); \
+    } while(0)
+
+#include <esp_spi_flash.h>
+
+namespace Esp32Logging {
+    const constexpr char* kLoggingTag = "SysInfo";
+
+    static void __attribute__ ((unused)) LogTaskStats(esp_log_level_t level)
+    {
+#ifdef CONFIG_FREERTOS_USE_TRACE_FACILITY
+        int numTasks = uxTaskGetNumberOfTasks();
+        TaskStatus_t *stats = (TaskStatus_t *)malloc(numTasks * sizeof(TaskStatus_t));
+        
+        int charBufferLen = (1 + numTasks) * (15 + 2 + 5 + 2 + 4 + 2 + 7 + 2 + 7 + 2 + 4 + 2 + 10 + 2 + 9 + 1) + 1 + 100; // some more space in case of formatting errors
+        char *charBuffer = (char *)malloc(charBufferLen);
+        ESP_LOGV(kLoggingTag, "charBufferLen: %i", charBufferLen);
+
+        if (stats != NULL && charBuffer != NULL)
+        {
+            uint32_t tasksTotalTime;
+            numTasks = uxTaskGetSystemState(stats, numTasks, &tasksTotalTime);
+            // for percentage calculations
+            tasksTotalTime /= 100UL;
+
+            // avoid divide by zero errors
+            if (tasksTotalTime > 0)
+            {
+                // header line
+                char* bufferPos = charBuffer;
+                sprintf(bufferPos, "%-15s  %5s  %4s  %7s  %7s  %4s  %10s  %9s\n", "Name", "State", "Prio", "HighWaM", "TaskNum", "Core", "RunT Abs", "RunT Perc");
+                bufferPos += strlen(bufferPos);
+
+                // sort by task number
+                std::sort(stats, stats + numTasks, [](TaskStatus_t& a, TaskStatus_t& b) { return a.xTaskNumber < b.xTaskNumber; });
+
+                char percentageString[4];
+                constexpr char stateToChar[] = { 'U', 'R', 'B', 'S', 'D' };
+                for (int i = 0; i < numTasks; i++)
+                {
+                    uint32_t ulStatsAsPercentage = (stats[i].ulRunTimeCounter / portNUM_PROCESSORS) / tasksTotalTime;
+                    if (ulStatsAsPercentage > 0UL)
+                        sprintf(percentageString, "%u", ulStatsAsPercentage);
+                    else
+                        strcpy(percentageString, "<1");
+
+                    sprintf(bufferPos, "%-15s  %5c  %4u  %7u  %7u  %4hd  %10u  %7s %%\n", stats[i].pcTaskName, stateToChar[stats[i].eCurrentState], (uint)stats[i].uxCurrentPriority,
+                            (uint)stats[i].usStackHighWaterMark, (uint)stats[i].xTaskNumber, (uint)stats[i].xCoreID, (uint)stats[i].ulRunTimeCounter, percentageString);
+                    bufferPos += strlen(bufferPos);
+                }
+                ESP_LOGV(kLoggingTag, "strlen(charBuffer): %i", strlen(charBuffer));
+
+                ESP_LOG_LEVEL_LOCAL(level, kLoggingTag, "\n*** FreeRTOS Task Statistics ***\n%s", charBuffer);
+            }
+        }
+        
+        free(charBuffer);
+        free(stats);
+#endif
+    }
+
+    static void __attribute__ ((unused)) LogSysInfo(esp_log_level_t level, bool full)
+    {
+        if (full) {
+            esp_chip_info_t info;
+            esp_chip_info(&info);
+            ESP_LOG_LEVEL_LOCAL(level, kLoggingTag, "Chip info: model:%s, cores:%d, feature:%s%s%s%s%d MB, revision number:%d, IDF Version:%s",
+                info.model == CHIP_ESP32 ? "ESP32" : "Unknow", info.cores,
+                info.features & CHIP_FEATURE_WIFI_BGN ? "/802.11bgn" : "", info.features & CHIP_FEATURE_BLE ? "/BLE" : "", info.features & CHIP_FEATURE_BT ? "/BT" : "",
+                info.features & CHIP_FEATURE_EMB_FLASH ? "/Embedded-Flash:" : "/External-Flash:", spi_flash_get_chip_size() / (1024 * 1024), info.revision,
+                esp_get_idf_version());
+        }
+        ESP_LOG_LEVEL_LOCAL(level, kLoggingTag, "Current free heap size: %u, min free heap size: %u", esp_get_free_heap_size(), heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT));
+        
+        LogTaskStats(level);
+    }
+}
