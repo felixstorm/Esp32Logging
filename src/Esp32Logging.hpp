@@ -31,7 +31,20 @@ setup(): esp_log_level_set("*", ESP_LOG_INFO);
 #define ESP_LOGD( tag, format, ... ) ESP_LOG_LEVEL_LOCAL(ESP_LOG_DEBUG,   tag, format, ##__VA_ARGS__)
 #define ESP_LOGV( tag, format, ... ) ESP_LOG_LEVEL_LOCAL(ESP_LOG_VERBOSE, tag, format, ##__VA_ARGS__)
 
+#ifdef ESP_LOG_NO_SYSTIME
 #define LOG_FORMAT(letter, tag, format)  #letter " (%d) %s: [%s:%u] %s(): " format "\n", esp_log_timestamp(), tag, pathToFileName(__FILE__), __LINE__, __FUNCTION__
+#else
+static time_t log_now_time;
+static struct tm log_now_tm;
+static char log_now_string[50];
+static const char* esp_log_timestamp_time() {
+    time(&log_now_time);
+    localtime_r(&log_now_time, &log_now_tm);
+    strftime(log_now_string, sizeof(log_now_string), "%Y-%m-%d %H:%M:%S", &log_now_tm);
+    return log_now_string;
+}
+#define LOG_FORMAT(letter, tag, format)  #letter " (%s / %d) %s: [%s:%u] %s(): " format "\n", esp_log_timestamp_time(), esp_log_timestamp(), tag, pathToFileName(__FILE__), __LINE__, __FUNCTION__
+#endif
 
 #define ESP_LOG_LEVEL(level, tag, format, ...) do {                     \
         if (level==ESP_LOG_ERROR )          { esp_log_write(ESP_LOG_ERROR,      tag, LOG_FORMAT(E, tag, format), ##__VA_ARGS__); } \
