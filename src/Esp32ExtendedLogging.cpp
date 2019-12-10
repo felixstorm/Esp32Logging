@@ -117,9 +117,10 @@ void Esp32ExtendedLogging::sendCharToSyslog(char c)
     if (lastError && millis() - lastError < delayOnError)
         return;
 
-    // No need to try without network
-    if (!WiFi.isConnected())
-        return;
+    // TBD: does not work when using ethernet
+    // // No need to try without network
+    // if (!WiFi.isConnected())
+    //     return;
 
     do
     {
